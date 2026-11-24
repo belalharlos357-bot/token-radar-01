@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — which pre-token protocol is worth farming next</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <p class="eyebrow">DEFI LLAMA SNAPSHOT &middot; <span id="asOf"></span></p>
+    <h1>Token Radar</h1>
+    <p class="lede">Every protocol that records no token, ranked by what its token would be worth
+      if the record stayed as it is — and what to do to farm it before it launches.</p>
+    <div class="stats" id="stats"></div>
+  </div>
+</header>
+
+<nav class="tabs wrap" id="tabs">
+  <button data-tab="board" class="active">Board</button>
+  <button data-tab="live">Live tokens</button>
+  <button data-tab="model">How the model works</button>
+</nav>
+
+<main class="wrap">
+  <section id="tab-board">
+    <div class="controls">
+      <input id="q" type="search" placeholder="Search a protocol…" aria-label="Search protocols">
+      <select id="cat" aria-label="Category"><option value="">All categories</option></select>
+      <select id="chain" aria-label="Chain"><option value="">All chains</option></select>
+      <select id="minTvl" aria-label="Minimum TVL">
+        <option value="0">Any TVL</option>
+        <option value="1000000000">TVL $1B+</option>
+        <option value="500000000">TVL $500M+</option>
+        <option value="100000000">TVL $100M+</option>
+        <option value="50000000">TVL $50M+</option>
+      </select>
+      <select id="sort" aria-label="Sort by">
+        <option value="value">Sort: implied value</option>
+        <option value="tvl">Sort: TVL</option>
+        <option value="growth">Sort: 7-day growth</option>
+        <option value="age">Sort: oldest first</option>
+      </select>
+      <label class="check"><input id="watchOnly" type="checkbox"> Watchlist only</label>
+    </div>
+    <p class="count" id="count"></p>
+
+    <article class="detail" id="detail" hidden></article>
+
+    <table class="board">
+      <thead><tr>
+        <th class="num">#</th><th>Protocol</th><th>Category</th><th>Chains</th>
+        <th class="num">TVL</th><th class="num">7d</th><th class="num">Age</th>
+        <th class="num">Implied value</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="note">Implied value is this radar's own claim from the snapshot's figures — TVL,
+      seven-day growth, time running with no token, and chain breadth. It is not a
+      prediction of whether or when a token is issued. A protocol on the board
+      <strong>records no token</strong>; that is DefiLlama's record, not proof it has none.</p>
+  </section>
+
+  <section id="tab-live" hidden>
+    <h2>Live tokens, for comparison</h2>
+    <p class="lede2">These protocols already trade. The board never mixes them in: their value is
+      the market's own, not a model's. They are here so a reader can see what a
+      launched token is actually worth next to a pre-token claim.</p>
+    <table class="board">
+      <thead><tr><th>Protocol</th><th>Category</th><th>Chains</th>
+        <th class="num">TVL</th><th class="num">Market cap</th><th class="num">7d</th></tr></thead>
+      <tbody id="liveRows"></tbody>
+    </table>
+  </section>
+
+  <section id="tab-model" hidden>
+    <h2>How the model works</h2>
+    <div class="formula" id="formula"></div>
+    <h3>Why these four factors</h3>
+    <ul class="why">
+      <li><strong>TVL &times; 0.30</strong> — the size of the prize. A token usually launches at a
+        fraction of the value already locked in the protocol.</li>
+      <li><strong>Growth</strong> — seven-day TVL change, clamped to &minus;50%…+150%, weighted
+        0.60. Fast-growing protocols are where the next value is forming.</li>
+      <li><strong>Maturity</strong> — days since DefiLlama began tracking, up to four years.
+        A protocol that has run longer with no token has a bigger backlog of value to distribute.</li>
+      <li><strong>Breadth</strong> — +3% per chain, up to six chains. Value spread across
+        chains is harder to move and easier to keep.</li>
+    </ul>
+    <h3>What the board is not</h3>
+    <ul class="why">
+      <li>It does not predict whether or when a token is issued.</li>
+      <li>It never ranks a protocol by name: the same function scores every row.</li>
+      <li>Wrapped, staked and bridged products of tokens that already trade are left out,
+        as are exchanges and versioned pools of another protocol.</li>
+      <li>Farm steps are a starting plan, not financial advice. Never pay to claim an
+        airdrop, and claim only from a link the protocol itself publishes.</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="wrap">
+  <p>Source: <span id="source"></span>. Watchlist floor: <span id="floor"></span>.
+  Built by a program that reads the sealed snapshot and nothing else — run it again on a
+  new snapshot and the board moves with the data.</p>
+</footer>
+
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
