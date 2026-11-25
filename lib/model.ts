@@ -391,9 +391,11 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): { actio
 }
 
 /**
- * A protocol's farm plan: six steps, each an action with a cost and a time. The plan is
+ * A protocol's farm plan: eight steps, each an action with a cost and a time. The plan is
  * derived from the protocol's own record (category, chains, TVL, age), never from a
- * hand-written list of names.
+ * hand-written list of names. The two steps a six-step plan skips are the ones that cost
+ * farmers the most: checking whether the protocol counts the action at all, and deciding
+ * the exit before entering.
  */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
@@ -406,6 +408,11 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       text: `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`,
       cost: 'under $3 of gas for the first transaction',
       time: '5 minutes',
+    },
+    {
+      text: `Read the protocol's own docs or points page first and confirm the action below is one it counts toward a distribution; note the date it started counting, and make the first move before any snapshot it announces.`,
+      cost: 'nothing to read',
+      time: '15 minutes',
     },
     {
       text: action,
@@ -421,6 +428,11 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       text: `Hold the position for at least ${hold} days so the activity is counted in more than one snapshot.`,
       cost: `the $${capital} stays in the position`,
       time: `${hold} days`,
+    },
+    {
+      text: `Decide the exit before you enter: if the position falls 20% below the $${capital} you put in, or the protocol announces a token or a snapshot, withdraw within a day; never leave the whole amount in one protocol.`,
+      cost: 'nothing until you exit',
+      time: '5 minutes to set the rule',
     },
     {
       text: `Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes, never from a link in a message.`,

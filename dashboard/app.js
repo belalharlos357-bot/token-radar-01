@@ -4,7 +4,8 @@
 //
 // Deep links, used by the screenshots and by readers: ?detail=<slug> opens a
 // protocol's detail view, ?cat=<category> filters to one category,
-// ?watch=1 shows the watchlist only, ?sort=tvl|growth|age changes the order.
+// ?watch=1 shows the watchlist only, ?sort=tvl|growth|age changes the order,
+// ?tab=live|model opens that tab.
 
 (function () {
   'use strict';
@@ -189,6 +190,13 @@
     document.querySelectorAll('#tabs button').forEach(function (x) { x.classList.toggle('active', x === b); });
     ['board', 'live', 'model'].forEach(function (t) { $('tab-' + t).hidden = t !== b.getAttribute('data-tab'); });
   });
+
+  // ---- deep link: ?tab=live|model opens that tab on load, like ?detail= opens a row ----
+  var tabParam = params.get('tab');
+  if (tabParam === 'live' || tabParam === 'model') {
+    document.querySelectorAll('#tabs button').forEach(function (x) { x.classList.toggle('active', x.getAttribute('data-tab') === tabParam); });
+    ['board', 'live', 'model'].forEach(function (t) { $('tab-' + t).hidden = t !== tabParam; });
+  }
 
   // ---- controls ----
   $('q').addEventListener('input', function () { state.q = $('q').value; renderBoard(); });

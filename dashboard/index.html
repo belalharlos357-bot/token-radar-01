@@ -80,13 +80,36 @@
     <h3>Why these four factors</h3>
     <ul class="why">
       <li><strong>TVL &times; 0.30</strong> — the size of the prize. A token usually launches at a
-        fraction of the value already locked in the protocol.</li>
+        fraction of the value already locked in the protocol, never at the whole TVL; 0.30 is a
+        conservative haircut that keeps the board from claiming a token is worth everything
+        locked in it.</li>
       <li><strong>Growth</strong> — seven-day TVL change, clamped to &minus;50%…+150%, weighted
-        0.60. Fast-growing protocols are where the next value is forming.</li>
-      <li><strong>Maturity</strong> — days since DefiLlama began tracking, up to four years.
-        A protocol that has run longer with no token has a bigger backlog of value to distribute.</li>
-      <li><strong>Breadth</strong> — +3% per chain, up to six chains. Value spread across
-        chains is harder to move and easier to keep.</li>
+        0.60. Momentum is real, but one hot week should not decide a rank: the clamp stops a
+        single week's spike from swamping TVL, and the 0.60 weight means growth can cut the
+        claim by 30% at worst or nearly double it at best — it moves the result without owning it.</li>
+      <li><strong>Maturity</strong> — days since DefiLlama began tracking, up to four years
+        (1,460 days), on a floor of 0.55. A protocol that has run four years with no token gets
+        the full 1.00: the longest backlog of value to distribute. A brand-new protocol still
+        gets 0.55, never zero — a new protocol can still launch, it just has no backlog yet.
+        A protocol whose listing date is unknown is scored at 365 days (0.66), a neutral middle:
+        neither penalised as brand-new nor credited as four years old.</li>
+      <li><strong>Breadth</strong> — +3% per chain, up to six chains (at most &times;1.18). Value
+        spread across chains is harder to move and easier to keep; the cap stops a protocol
+        listed on twenty chains from gaming the rank.</li>
+    </ul>
+    <h3>Why the board leaves some protocols out</h3>
+    <ul class="why">
+      <li>A wrapped, staked or bridged product of a token that already trades is not a launch.
+        WBTC, Binance staked ETH, the Coinbase bridge: their value is already priced by the
+        market, and ranking them as launches would put already-priced value at the top of the
+        board and send farmers after a token that exists. This is the watchlist's own rule,
+        applied to every early row too — without it the top of the board would be products of
+        tokens that already trade.</li>
+      <li>Exchanges are left out for the same reason: their tokens trade, or they never issue one.</li>
+      <li>A name ending in a version (V2, V3, 2.0) is a pool of another protocol, not a protocol
+        of its own.</li>
+      <li>The 24 live-token protocols are shown apart, at the market's own value, so a reader can
+        hold a model's claim next to what a launched token is actually worth.</li>
     </ul>
     <h3>What the board is not</h3>
     <ul class="why">
