@@ -82,7 +82,21 @@
   function kpi(b, label) { return '<div class="box"><b>' + b + '</b><span>' + label + '</span></div>'; }
   function valueKept() { return R.value_ladder.filter(function (r) { return r.kept; }).length; }
   function oddsKept() { return R.odds_ladder.filter(function (r) { return r.kept; }).length; }
-  function keptOddsNames() { return R.odds_ladder.filter(function (r) { return r.kept; }).map(function (r) { return r.term; }).join(', '); }
+  function keptOddsNames() { return R.odds_ladder.filter(function (r) { return r.kept; }).map(function (r) { return r.term; }).join(' · '); }
+  // The kept odds terms as "name — definition" pairs, so the list reads as
+  // five items (intercept + four features) instead of a comma run that
+  // looks like seven. Unknown terms fall back to their ladder name.
+  function oddsTermDefs() {
+    var defs = {
+      'age, ln days listed': 'age — ln days listed',
+      'size, ln TVL': 'size — ln(TVL / $100M)',
+      'chain count, ln (capped at 3)': 'chain count — ln(chains, capped at 3)',
+      '7-day growth × size': '7-day growth × size — growth × ln TVL',
+      '7-day TVL growth': '7-day growth — change over 7 days',
+      'category token rate, shrunk': 'category token rate — shrunk share of peers with a token',
+    };
+    return R.odds_ladder.filter(function (r) { return r.kept; }).map(function (r) { return defs[r.term] || r.term; }).join(', ');
+  }
   function tierFarm(dep) {
     var t = null;
     (R.tier_counts || []).forEach(function (x) { if (x.deposit_usd === dep) t = x; });
@@ -220,6 +234,24 @@
     var v = net > tbill && net / hours >= 25 ? 'FARM' : net > 0 ? 'MARGINAL' : 'SKIP';
     return { dep: dep, drop: drop, net: net, perHour: net / hours, tbill: tbill, verdict: v };
   }
+  // ---- minimum deposit that clears both bars (D1) ----
+  // Both bars are linear in the deposit: drop = implied x (D / TVL) x share,
+  // net = drop - fees, and FARM needs net > D x 4% x (horizon / 52) and
+  // net / hours >= $25. So the smallest D that clears both is the larger of
+  // the two one-bar answers, rounded up a dollar so the T-bill comparison
+  // is strict. When the drop per dollar of deposit never beats the T-bill
+  // rate (implied / TVL <= 0.132 at the stated 7% / 12 weeks), no deposit
+  // ever clears both bars and the row tops out at MARGINAL.
+  function minDeposit(r) {
+    var slope = r.implied_value_usd * state.share / Math.max(1, r.tvl_usd);
+    var fees = r.verdict.fees_usd;
+    var hours = Math.max(0.5, r.verdict.hands_on_minutes / 60);
+    var tbillRate = 0.04 * (state.horizon / 52);
+    if (slope <= tbillRate) return null;
+    var dHour = (25 * hours + fees) / slope;
+    var dBill = fees / (slope - tbillRate);
+    return Math.floor(Math.max(dHour, dBill)) + 1;
+  }
   function verdictCounts() {
     var c = { FARM: 0, MARGINAL: 0, SKIP: 0 };
     R.rows.forEach(function (r) { c[price(r).verdict]++; });
@@ -353,6 +385,12 @@
       '<table class="mini"><tr><th>Token</th><th>Category</th><th>TVL</th><th>Market cap</th><th>Cap / TVL</th><th>Fitted multiple</th></tr>' + peers + '</table>' +
       '<p class="note">Chain count (capped at 3) is in the value model — it improves all four held-out tests — while category effect, 7-day growth and age as value terms each failed a held-out test, so they stay out. The odds keep age, size, chain count (capped at 3) and growth × size; plain 7-day growth failed there too, the category token rate was dropped on purpose (see the model tab), and Platt and isotonic calibration helped walk-forward but not 5-fold, so neither is used.</p>' +
       '<h3>Farm verdict · <span class="pill ' + p.verdict.toLowerCase() + '">' + p.verdict + '</span></h3>' +
+      '<p class="note" style="margin-top:2px">Minimum deposit to clear both bars at the drop share and horizon above: <b>' +
+      (function () {
+        var md = minDeposit(r);
+        if (md === null) return 'no deposit clears them</b> — the modelled drop never beats a 4% T-bill at this implied / TVL, so this row tops out at MARGINAL.';
+        return (md >= 100000 ? money(md) : '$' + Math.round(md).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')) + '</b> — below that the plan is MARGINAL or SKIP.';
+      })() + '</p>' +
       '<div class="verdictbox"><div class="vhead"><b>' + p.verdict + ': ' + money(p.dep) + ' for ' + state.horizon + ' weeks buys a modelled drop of ' + dollars(p.drop) + ' for ' + dollars(r.verdict.fees_usd) + ' of fees and ' + (r.verdict.hands_on_minutes / 60).toFixed(1) + ' h of work, a net of ' + dollars(p.net) + ' (' + dollars(p.perHour) + ' an hour) against ' + dollars(p.tbill) + ' from the same money in a 4% T-bill.</b></div>' +
       '<div class="vgrid">' +
       '<div><b>' + money(p.dep) + '</b><span>At risk</span></div>' +
@@ -395,14 +433,27 @@
     'value if it launches = TVL × fitted multiple;  ' + valueFormula() + '\n' +
     '  fitted on ' + vf.n_peers + ' traded protocols with a usable market cap; multiple clamped to 0.01..1.00\n' +
     '  held out four ways: leave-one-out miss ×' + vf.loo_miss.toFixed(2) + ' vs ×' + vf.flat_loo_miss.toFixed(2) + ' flat; walk-forward ×' + vf.wf_miss.toFixed(2) + ' vs ×' + vf.flat_wf_miss.toFixed(2) + ' flat; leave-a-category-out ×' + vf.loco_miss.toFixed(2) + '; leave-a-chain-out ×' + vf.locho_miss.toFixed(2) + '\n' +
-    'token odds = logistic(1, ' + keptOddsNames() + ');  coefficients ' + of.beta.map(function (b) { return b.toFixed(3); }).join(', ') + '\n' +
+    'token odds = logistic(1 — intercept, ' + oddsTermDefs() + ');  coefficients ' + of.beta.map(function (b) { return b.toFixed(3); }).join(', ') + '\n' +
     '  fitted on ' + of.n_peers + ' dated protocols; base rate ' + of.base_rate.toFixed(3) + '\n' +
     '  held out four ways: Brier 5-fold ' + of.brier_fold5.toFixed(3) + ' vs ' + of.brier_base_fold5.toFixed(3) + ' base; walk-forward ' + of.brier_wf.toFixed(3) + ' vs ' + of.brier_base_wf.toFixed(3) + ' base; leave-a-category-out ' + of.loco_brier.toFixed(3) + '; leave-a-chain-out ' + of.locho_brier.toFixed(3) + '; AUC 5-fold ' + of.auc_fold5.toFixed(3) + '\n' +
     '  the category token rate is NOT in the odds: it is a marginal, era-confounded average, so it is swept as a diagnostic only (best k=' + of.cat_rate_k + ': with the rate, Brier 5-fold ' + of.cat_rate_diagnostic.with_fold5.toFixed(3) + ' and walk-forward ' + of.cat_rate_diagnostic.with_wf.toFixed(3) + '; without it, ' + of.cat_rate_diagnostic.without_fold5.toFixed(3) + ' and ' + of.cat_rate_diagnostic.without_wf.toFixed(3) + ') — the forward-looking test moves within noise, the mixed-era test pays 0.007, and one feature no longer decides the board’s top\n' +
     'range = fitted value × residual quantiles (P25 ' + vf.residual_q25.toFixed(2) + ', P75 ' + vf.residual_q75.toFixed(2) + '; P10 ' + vf.residual_q10.toFixed(2) + ', P90 ' + vf.residual_q90.toFixed(2) + ' in log points), cut per category where the category has 5+ priced peers (' + vf.range_cat_n + ' categories), blended with the global band at weight n/(n+8), and from the global band otherwise; held-out coverage per category ' + Math.round(vf.range_cat_p2575 * 100) + '% (P25–P75, stated 50%) and ' + Math.round(vf.range_cat_p1090 * 100) + '% (P10–P90, stated 80%)\n' +
-    'rank range = 5th..95th rank across 200 bootstrap refits of the curve on resampled peers (fixed seed)\n' +
+    'rank range = 5th..95th rank across 200 bootstrap refits of the curve on resampled peers (fixed seed); wide at the top because the board is flat (top 10 span only ×' + (R.rows[0].implied_value_usd / R.rows[9].implied_value_usd).toFixed(2) + '), not because the band is loose\n' +
     'default deposit $5,000 flat, for every row; the board also prices $1,000 and $25,000 under the same two bars\n' +
     'model ' + R.model_version + ' — the same function scores every row; no name is special-cased.';
+  // ---- farm matrix: verdicts by deposit, one line (D2) ----
+  // The board prices every row at $1K / $5K / $25K under the same two bars;
+  // this line is the 3-deposit × 3-verdict count, so a reader sees what a
+  // bigger cheque buys without opening a row. It sits right under the
+  // formula block so it is in the model-tab screenshot.
+  (function () {
+    var tiers = (R.tier_counts || []).slice().sort(function (a, b) { return a.deposit_usd - b.deposit_usd; });
+    if (!tiers.length) return;
+    var line = '<b>Farm matrix — verdicts by deposit, same two bars:</b> ' + tiers.map(function (t) {
+      return money(t.deposit_usd) + ' ' + t.farm + ' FARM · ' + t.marginal + ' MARGINAL · ' + t.skip + ' SKIP';
+    }).join(' &nbsp;—&nbsp; ');
+    $('formula').insertAdjacentHTML('afterend', '<p class="note" id="farmMatrix">' + line + '</p>');
+  })();
   $('whyModel').innerHTML =
     '<li><strong>The value model is the size curve plus capped chain count.</strong> A flat median multiple misses by ×' + vf.flat_loo_miss.toFixed(2) + ' held out; the size curve alone misses by ×' + R.value_ladder[1].loo.toFixed(2) + ' (walk-forward ×' + R.value_ladder[1].wf.toFixed(2) + ' vs ×' + vf.flat_wf_miss.toFixed(2) + ' flat); adding ln(chains, capped at 3) takes it to ×' + vf.loo_miss.toFixed(2) + ' (walk-forward ×' + vf.wf_miss.toFixed(2) + ', leave-a-category-out ×' + vf.loco_miss.toFixed(2) + '). Small protocols carry higher multiples than big ones, and at the same TVL a multi-chain protocol’s token is worth less — the data says so, so the curve says so. The cap matters: the uncapped log count is outlier leverage (one priced peer lists 58 chains) and fails leave-one-out.</li>' +
     '<li><strong>Category, growth and age were tested as value terms and not kept; chain count was.</strong> Each failed at least one held-out test (see the ladders above): category improves leave-one-out (×' + R.value_ladder[2].loo.toFixed(2) + ') but not walk-forward (×' + R.value_ladder[2].wf.toFixed(2) + '), growth and age fail the same way. A term is kept only when it improves the walk-forward miss by more than the margin without making the leave-one-out miss worse; chain count (capped at 3) is the one that does, on all four tests.</li>' +

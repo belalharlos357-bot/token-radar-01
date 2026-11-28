@@ -43,6 +43,20 @@
 //     weight n/(n+8), so a thin category is pulled toward the global band
 //     instead of trusting 5 residuals. Held-out coverage P25-P75 50.0% ->
 //     51.1%, P10-P90 77.2% -> 80.4%, with 5 categories on their own band.
+//
+// radar-8 keeps radar-7's value model, its conformal bands and its farm
+// bars, and moves two things. The odds ridge penalty goes λ=1 -> λ=3:
+// R8's sweep printed only the walk-forward side (λ=2 -> 0.2432, λ=3 ->
+// 0.2418, λ=5 -> 0.2395) and never the 5-fold price; re-measured with both
+// metrics, λ=3 costs 0.00016 on 5-fold (inside the 0.0005 noise bar) for
+// 0.0027 of walk-forward, AUC 0.726 -> 0.727, LOCO/LOChO flat — so λ=3 is
+// the largest shrinkage that stays inside noise. The other move is
+// display only: the detail view prints the minimum deposit that clears
+// both bars at the stated drop share and horizon (or says no deposit
+// clears them), the model tab carries a 3-deposit × 3-verdict farm matrix,
+// the odds feature list is printed as name — definition instead of a
+// comma run, and the rank-range line says why the top range is wide.
+// Nothing else moves: value, bands, thresholds, default deposit.
 // The numbers below are computed from the snapshot at run
 // time — this file states the rules, the snapshot supplies the coefficients.
 //
@@ -149,7 +163,7 @@ export interface LadderRow {
   note: string;
 }
 
-/** The fitted token-odds model: logistic on ln(age), ln(TVL / $100M), ln(chains) capped at 3 and 7-day growth x ln(TVL), ridge-shrunk (lambda=1) on standardised features. No category token rate: it is dropped by policy (see the odds ladder), not by the tests. */
+/** The fitted token-odds model: logistic on ln(age), ln(TVL / $100M), ln(chains) capped at 3 and 7-day growth x ln(TVL), ridge-shrunk (lambda=3) on standardised features. No category token rate: it is dropped by policy (see the odds ladder), not by the tests. */
 export interface OddsFit {
   beta: number[];
   terms: number[];
@@ -296,7 +310,7 @@ export class SnapshotError extends Error {
 }
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-7';
+export const MODEL_VERSION = 'radar-8';
 
 /** How many live-token protocols the Live view carries: every priced comp, not a top slice. */
 export const LIVE_ROWS = 92;
@@ -386,12 +400,17 @@ export function getCategoryRateK(): number {
  *  over ~35–46 peers moves in steps far larger than float dust, so a smaller
  *  difference is no improvement at all — it is the median not moving. */
 const KEEP_MARGIN = 0.999;
-/** The odds' ridge penalty λ on standardised features: λ=1 is the largest
- *  shrinkage that costs nothing on the 5-fold test (0.2179 at λ=0 and λ=1)
- *  while the walk-forward Brier improves 0.2463 → 0.2447. Larger λ trades
- *  5-fold for walk-forward and is not taken: the walk-forward test is the
- *  honest forward check, not a tuning target. */
-export const ODDS_RIDGE_LAMBDA = 1;
+/** The odds' ridge penalty λ on standardised features: λ=3 is the largest
+ *  shrinkage whose 5-fold cost stays inside noise (5-fold 0.2172 at λ=1,
+ *  0.2173 at λ=3 — a cost of 0.00016 against a 0.0005 noise bar) while the
+ *  walk-forward Brier improves 0.2443 → 0.2416, AUC 0.726 → 0.727, and
+ *  leave-one-category-out / leave-one-chain-out stay flat (0.220 / 0.219).
+ *  λ=5 buys a little more walk-forward (0.2394) for a cost of 0.00041,
+ *  too close to the noise bar to take; λ=1 was R8's choice, and R9's
+ *  re-measurement is what moves it. The penalty goes in BOTH the Hessian
+ *  diagonal and the gradient — penalising the Hessian alone leaves the
+ *  Newton step converging to the unpenalised optimum. */
+export const ODDS_RIDGE_LAMBDA = 3;
 /** Whether `next` beats `prev` by more than the keep margin. */
 function beats(next: number, prev: number): boolean {
   return next < prev * KEEP_MARGIN;
