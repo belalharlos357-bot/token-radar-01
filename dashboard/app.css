@@ -78,7 +78,7 @@ h3 { font-size: 16px; margin: 20px 0 6px; }
 .depbtn.active { background: var(--accent); color: #06202f; border-color: var(--accent); font-weight: 700; }
 .count { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
 table.board { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; font-size: 13.5px; }
-.board th, .board td { padding: 6px 9px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+.board th, .board td { padding: 5px 9px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
 .board thead th { background: var(--panel2); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
 .board tbody tr { cursor: pointer; }
 .board tbody tr:hover { background: var(--panel2); }
@@ -96,7 +96,7 @@ table.board { width: 100%; border-collapse: collapse; background: var(--panel); 
 .pill.farm { background: var(--green); color: #052e1b; }
 .pill.marginal { background: var(--amber); color: #231303; }
 .pill.skip { background: #3a4a68; color: #c6d3e6; }
-.vnet { display: block; font-size: 12px; color: var(--muted); margin-top: 3px; }
+.vnet { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .vnet b { color: var(--text); }
 .detail { background: var(--panel2); border: 1px solid var(--accent); border-radius: var(--radius); padding: 18px 20px; margin: 0 0 16px; }
 .detail h2 { margin-top: 0; }

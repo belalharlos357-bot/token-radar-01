@@ -7,17 +7,43 @@
 // row from the snapshot's own figures only.
 //
 // radar-6 replaces radar-5's odds and its default deposit. The value curve
-// is unchanged: every extra value term tried in R5–R7 (quadratic,
+// was unchanged then: every extra value term tried in R5–R7 (quadratic,
 // interactions, robust and age-weighted fits, weighted regressions) failed at
-// least one held-out test, so the size curve alone still stands — the
-// snapshot is exhausted on the value side, and the note says so instead of
-// forcing a fit. The odds drop the category token rate: it is a marginal,
+// least one held-out test, so the size curve alone stood — the snapshot
+// looked exhausted on the value side, and the note said so instead of
+// forcing a fit. Radar-7 overturns that on one term: the capped chain count
+// passes all four held-out tests (see below), so the size curve no longer
+// stands alone. The odds drop the category token rate: it is a marginal,
 // era-confounded average (Risk Curators average 193 days listed, CDP 936),
 // its coefficient carries a 1.58-logit swing on the top pair, and its
 // forward-looking value is nil — the walk-forward Brier moves within noise
 // without it, while the mixed-era 5-fold costs 0.009. The default deposit
 // is a flat $5,000, a retail cheque the verdict can be read against, instead
-// of a slice of TVL. The numbers below are computed from the snapshot at run
+// of a slice of TVL.
+//
+// radar-7 replaces radar-6's value model, its odds fit and its range bands.
+//   value: the size curve plus the capped chain count. Capping ln(chains) at
+//     3 turns the chain term from a failure (uncapped: LOO x3.47, WF x2.08)
+//     into the first value term the snapshot supports: LOO x3.34 -> x2.93,
+//     WF x2.11 -> x2.08, leave-a-category-out x3.73 -> x2.88, leave-a-chain-out
+//     x3.34 -> x3.33. The uncapped log count is outlier leverage — one priced
+//     peer lists 58 chains — and the cap is the same 3 on both sides, so one
+//     story covers it. The coefficient is negative (-0.448): at the same TVL
+//     a multi-chain protocol's token is worth less, and the board's top three
+//     keep their order anyway. Cap 2 fails walk-forward (x2.26); cap 4 agrees
+//     with cap 3 within noise, so 3 is the cap, not a cherry-pick.
+//   odds: the same capped chain count, plus a ridge penalty (lambda=1) on
+//     standardised features, penalty in both the Hessian and the gradient.
+//     5-fold 0.218 -> 0.217, walk-forward 0.246 -> 0.244, AUC 0.722 -> 0.726,
+//     LOCO 0.222 -> 0.220, LOChO 0.218 unchanged. Lambda=1 is the largest
+//     shrinkage that costs nothing on 5-fold; larger lambda trades 5-fold
+//     for walk-forward and is not taken.
+//   ranges: a category carries its own band at 5+ priced peers (was 8), and
+//     the band blends the category's own quantiles with the global band at
+//     weight n/(n+8), so a thin category is pulled toward the global band
+//     instead of trusting 5 residuals. Held-out coverage P25-P75 50.0% ->
+//     51.1%, P10-P90 77.2% -> 80.4%, with 5 categories on their own band.
+// The numbers below are computed from the snapshot at run
 // time — this file states the rules, the snapshot supplies the coefficients.
 //
 //   value if it launches = TVL x fitted multiple(TVL)
@@ -83,10 +109,12 @@ export interface Snapshot {
   watchlist: string[];
 }
 
-/** The fitted value curve: ln(mcap) = a + b x ln(TVL / $100M), OLS on the traded peers. */
+/** The fitted value curve: ln(mcap) = a + b x ln(TVL / $100M) + chain_coef x ln(chains, capped at 3), OLS on the traded peers. chain_coef is null when the ladder keeps the size curve alone. */
 export interface ValueFit {
   a: number;
   b: number;
+  /** The capped chain-count coefficient of the kept value model, or null for the size curve alone. */
+  chain_coef: number | null;
   n_peers: number;
   flat_multiple: number;
   loo_miss: number;
@@ -99,7 +127,7 @@ export interface ValueFit {
   residual_q90: number;
   range_p2575: number;
   range_p1090: number;
-  /** Leave-one-category-out and leave-one-chain-out median miss of the size curve. */
+  /** Leave-one-category-out and leave-one-chain-out median miss of the kept value model. */
   loco_miss: number;
   locho_miss: number;
   /** Share of priced caps inside their own category's leave-one-out band
@@ -121,7 +149,7 @@ export interface LadderRow {
   note: string;
 }
 
-/** The fitted token-odds model: logistic on ln(age), ln(TVL / $100M), ln(chains) and 7-day growth x ln(TVL). No category token rate: it is dropped by policy (see the odds ladder), not by the tests. */
+/** The fitted token-odds model: logistic on ln(age), ln(TVL / $100M), ln(chains) capped at 3 and 7-day growth x ln(TVL), ridge-shrunk (lambda=1) on standardised features. No category token rate: it is dropped by policy (see the odds ladder), not by the tests. */
 export interface OddsFit {
   beta: number[];
   terms: number[];
@@ -268,7 +296,7 @@ export class SnapshotError extends Error {
 }
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-6';
+export const MODEL_VERSION = 'radar-7';
 
 /** How many live-token protocols the Live view carries: every priced comp, not a top slice. */
 export const LIVE_ROWS = 92;
@@ -309,6 +337,29 @@ export const GAS_DEFAULT_USD = 0.1;
 /** The fitted multiple's sanity bound: the clamp binds nowhere on this snapshot. */
 export const MULTIPLE_MIN = 0.01;
 export const MULTIPLE_MAX = 1.0;
+/** Chain count is capped at 3 in both models: chains 1→3 carry signal, and
+ *  beyond 3 the log count is outlier leverage (one priced peer lists 58
+ *  chains). The cap is the same on both sides so one story covers it. */
+export const CHAIN_CAP = 3;
+/** ln(chains), capped at CHAIN_CAP: the chain term both models use. */
+export function cappedChainCount(p: SnapshotProtocol): number {
+  return ln(Math.min(CHAIN_CAP, Math.max(1, p.chains.length)));
+}
+/** The kept value model: the size curve, plus the capped chain count when
+ *  the ladder keeps it (chain_coef null = size curve alone). */
+export interface ValueFitModel {
+  a: number;
+  b: number;
+  chain_coef: number | null;
+}
+/** The fitted value at a protocol under the kept value model. */
+export function valuePredict(p: SnapshotProtocol, fit: ValueFitModel): number {
+  return Math.exp(fit.a + fit.b * ln(Math.max(1, p.tvl_usd) / 1e8) + (fit.chain_coef ?? 0) * cappedChainCount(p));
+}
+/** The fitted multiple at a protocol: value / TVL, clamped to the sanity bound. */
+export function fittedMultiple(p: SnapshotProtocol, fit: ValueFitModel): number {
+  return clamp(valuePredict(p, fit) / Math.max(1, p.tvl_usd), MULTIPLE_MIN, MULTIPLE_MAX);
+}
 /** Category effects are shrunk by k pseudo-observations and need minN peers to count. */
 export const CAT_SHRINK_K = 64;
 export const CAT_MIN_N = 5;
@@ -335,6 +386,12 @@ export function getCategoryRateK(): number {
  *  over ~35–46 peers moves in steps far larger than float dust, so a smaller
  *  difference is no improvement at all — it is the median not moving. */
 const KEEP_MARGIN = 0.999;
+/** The odds' ridge penalty λ on standardised features: λ=1 is the largest
+ *  shrinkage that costs nothing on the 5-fold test (0.2179 at λ=0 and λ=1)
+ *  while the walk-forward Brier improves 0.2463 → 0.2447. Larger λ trades
+ *  5-fold for walk-forward and is not taken: the walk-forward test is the
+ *  honest forward check, not a tuning target. */
+export const ODDS_RIDGE_LAMBDA = 1;
 /** Whether `next` beats `prev` by more than the keep margin. */
 function beats(next: number, prev: number): boolean {
   return next < prev * KEEP_MARGIN;
@@ -437,12 +494,6 @@ export function olsFit(peers: SnapshotProtocol[]): { a: number; b: number } {
   return { a: my - b * mx, b };
 }
 
-/** The fitted multiple at a TVL: exp(a + b x ln(TVL / $100M)) / TVL, clamped to the sanity bound. */
-export function fittedMultiple(tvlUsd: number, fit: { a: number; b: number }): number {
-  const value = Math.exp(fit.a + fit.b * ln(Math.max(1, tvlUsd) / 1e8));
-  return clamp(value / Math.max(1, tvlUsd), MULTIPLE_MIN, MULTIPLE_MAX);
-}
-
 /** The median miss multiple of a predictor: exp(median |ln(real) - ln(predicted)|). */
 function missMultiple(peers: SnapshotProtocol[], predict: (p: SnapshotProtocol) => number): number {
   const errs = peers.map((p) => Math.abs(ln(p.mcap_usd!) - ln(Math.max(1, predict(p))))).sort((x, y) => x - y);
@@ -461,8 +512,8 @@ function looMiss(peers: SnapshotProtocol[], fitFn: (train: SnapshotProtocol[]) =
   return Math.exp(median(errs));
 }
 
-/** A 3-regressor OLS fit (intercept, ln TVL, one extra term) by normal equations. */
-function olsFit2(peers: SnapshotProtocol[], term: (p: SnapshotProtocol) => number): ((p: SnapshotProtocol) => number) | null {
+/** A 3-regressor OLS fit (intercept, ln TVL, one extra term) by normal equations, as coefficients. */
+function olsFit2Coefs(peers: SnapshotProtocol[], term: (p: SnapshotProtocol) => number): [number, number, number] | null {
   const X = peers.map((p) => [1, ln(p.tvl_usd / 1e8), term(p)]);
   const y = peers.map((p) => ln(p.mcap_usd!));
   const XtX = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
@@ -486,9 +537,32 @@ function olsFit2(peers: SnapshotProtocol[], term: (p: SnapshotProtocol) => numbe
       for (let k = c; k < 4; k++) M[r]![k]! -= f * M[c]![k]!;
     }
   }
-  const coef = [M[0]![3]! / M[0]![0]!, M[1]![3]! / M[1]![1]!, M[2]![3]! / M[2]![2]!];
+  const coef: [number, number, number] = [M[0]![3]! / M[0]![0]!, M[1]![3]! / M[1]![1]!, M[2]![3]! / M[2]![2]!];
   if (!coef.every(Number.isFinite)) return null;
-  return (p: SnapshotProtocol) => Math.exp(coef[0]! + coef[1]! * ln(p.tvl_usd / 1e8) + coef[2]! * term(p));
+  return coef;
+}
+
+/** A 3-regressor OLS fit (intercept, ln TVL, one extra term) by normal equations. */
+function olsFit2(peers: SnapshotProtocol[], term: (p: SnapshotProtocol) => number): ((p: SnapshotProtocol) => number) | null {
+  const coef = olsFit2Coefs(peers, term);
+  if (coef === null) return null;
+  return (p: SnapshotProtocol) => Math.exp(coef[0] + coef[1] * ln(p.tvl_usd / 1e8) + coef[2] * term(p));
+}
+
+/** Refit the kept value model on a peer subset (leave-one-out, groups,
+ *  bootstrap): the same family as the kept fit, never the size curve alone
+ *  when the chain term is kept. */
+function refitValueModel(train: SnapshotProtocol[], fit: ValueFitModel): ValueFitModel {
+  if (fit.chain_coef === null) {
+    const f = olsFit(train);
+    return { ...f, chain_coef: null };
+  }
+  const coefs = olsFit2Coefs(train, cappedChainCount);
+  if (coefs === null) {
+    const f = olsFit(train);
+    return { ...f, chain_coef: null };
+  }
+  return { a: coefs[0], b: coefs[1], chain_coef: coefs[2] };
 }
 
 /** Weighted least squares on ln(mcap) = a + b x ln(TVL / $100M). */
@@ -618,7 +692,7 @@ export const ODDS_FEATURES: { name: string; fn: (p: SnapshotProtocol, asOf: stri
   { name: 'age, ln days listed', fn: (p, asOf) => ln(Math.max(1, ageDays(asOf, p.listed_at) ?? 365)) },
   { name: 'size, ln TVL', fn: (p) => ln(Math.max(1, p.tvl_usd) / 1e8) },
   { name: '7-day TVL growth', fn: (p) => clamp(finite(p.change_7d, 0), -50, 150) / 100 },
-  { name: 'chain count, ln', fn: (p) => ln(Math.max(1, p.chains.length)) },
+  { name: 'chain count, ln (capped at 3)', fn: (p) => cappedChainCount(p) },
   {
     name: 'category token rate, shrunk',
     fn: (p, _asOf, ctx) => {
@@ -640,7 +714,7 @@ export function tokenOdds(p: SnapshotProtocol, asOf: string, beta: number[], ter
 }
 
 /** The value ladder: flat baseline, then the size curve, then each candidate term in turn. A term is kept only when it improves the walk-forward miss by more than the keep margin without making the leave-one-out miss worse. */
-function valueLadder(peers: SnapshotProtocol[], dated: SnapshotProtocol[], asOf: string): { ladder: LadderRow[]; fit: { a: number; b: number } } {
+function valueLadder(peers: SnapshotProtocol[], dated: SnapshotProtocol[], asOf: string): { ladder: LadderRow[]; fit: ValueFitModel } {
   const half = Math.floor(dated.length / 2);
   const train = dated.slice(0, half);
   const test = dated.slice(half);
@@ -698,7 +772,7 @@ function valueLadder(peers: SnapshotProtocol[], dated: SnapshotProtocol[], asOf:
   const extraTerms: { name: string; term: (p: SnapshotProtocol) => number }[] = [
     { name: '7-day TVL growth', term: (p) => clamp(finite(p.change_7d, 0), -50, 150) / 100 },
     { name: 'age, ln days listed', term: (p) => ln(Math.max(1, ageDays(asOf, p.listed_at) ?? 365)) },
-    { name: 'chain count, ln', term: (p) => ln(Math.max(1, p.chains.length)) },
+    { name: 'chain count, ln (capped at 3)', term: cappedChainCount },
   ];
   for (const { name, term } of extraTerms) {
     const loo = looMiss(peers, (rest) => {
@@ -773,7 +847,20 @@ function valueLadder(peers: SnapshotProtocol[], dated: SnapshotProtocol[], asOf:
       note: keeps([wf, loo], [sizeWf, sizeLoo]) ? 'kept' : 'tested, not kept',
     });
   }
-  return { ladder, fit: sizeFit };
+  // The kept value model: the size curve, plus the capped chain count when
+  // its ladder row is kept. The curve alternatives above return predictors,
+  // not coefficients, and none of them is ever kept — if one ever were, the
+  // fit below could not express it, so fail loudly instead of shipping a
+  // model the ladder does not describe.
+  const altKept = ladder.slice(6).some((r) => r.kept);
+  if (altKept) throw new Error('value ladder kept a whole-curve alternative the kept fit cannot express');
+  const chainRow = ladder.find((r) => r.term === 'chain count, ln (capped at 3)');
+  let keptFit: ValueFitModel = { ...sizeFit, chain_coef: null };
+  if (chainRow !== undefined && chainRow.kept) {
+    const coefs = olsFit2Coefs(peers, cappedChainCount);
+    if (coefs !== null) keptFit = { a: coefs[0], b: coefs[1], chain_coef: coefs[2] };
+  }
+  return { ladder, fit: keptFit };
 }
 
 /** The AUC of (outcome, probability) pairs, by the rank method with tied ranks averaged. */
@@ -951,17 +1038,33 @@ function oddsLadder(peers: SnapshotProtocol[], asOf: string): { ladder: LadderRo
   return { ladder, beta, terms: kept, baseRate, aucFold5: auc(oof), catRateK, catRateSweep, catRateDiagnostic, locoBrier, lochoBrier };
 }
 
-/** IRLS again, this time returning the coefficients themselves. */
-function fitLogitBeta(rows: { y: number; x: number[] }[], width: number): number[] | null {
+/** IRLS again, this time returning the coefficients themselves. The fit is
+ *  ridge-penalised (lambda = ODDS_RIDGE_LAMBDA): the non-intercept features
+ *  are standardised on the training rows first, so one lambda means the same
+ *  shrinkage on every feature whatever its scale, and the penalty goes in
+ *  BOTH the Hessian diagonal and the gradient — penalising the Hessian alone
+ *  leaves the Newton step converging to the unpenalised optimum. The returned
+ *  coefficients are in raw-feature space, so tokenOdds() needs no change. */
+function fitLogitBeta(rows: { y: number; x: number[] }[], width: number, lambda: number = ODDS_RIDGE_LAMBDA): number[] | null {
   const k = width;
+  const means = [0];
+  const sds = [1];
+  for (let j = 1; j < k; j++) {
+    const vals = rows.map((r) => r.x[j]!);
+    const m = vals.reduce((s, v) => s + v, 0) / vals.length;
+    const sd = Math.sqrt(vals.reduce((s, v) => s + (v - m) ** 2, 0) / vals.length) || 1;
+    means.push(m);
+    sds.push(sd);
+  }
+  const srows = rows.map((r) => ({ y: r.y, x: r.x.map((v, j) => (j === 0 ? v : (v - means[j]!) / sds[j]!)) }));
   const ones = rows.filter((r) => r.y === 1).length;
   const beta = new Array<number>(k).fill(0);
   beta[0] = ln((ones + 0.5) / (rows.length - ones + 0.5));
-  for (let iter = 0; iter < 50; iter++) {
+  for (let iter = 0; iter < 60; iter++) {
     const XtX = Array.from({ length: k }, () => new Array<number>(k).fill(0));
     const XtR = new Array<number>(k).fill(0);
     let maxStep = 0;
-    for (const r of rows) {
+    for (const r of srows) {
       const z = r.x.reduce((s, v, i) => s + v * beta[i]!, 0);
       const p = sigmoid(z);
       const w = Math.max(1e-6, p * (1 - p));
@@ -970,6 +1073,10 @@ function fitLogitBeta(rows: { y: number; x: number[] }[], width: number): number
         XtR[i]! += r.x[i]! * resid;
         for (let j = 0; j < k; j++) XtX[i]![j]! += w * r.x[i]! * r.x[j]!;
       }
+    }
+    for (let i = 1; i < k; i++) {
+      XtX[i]![i]! += lambda;
+      XtR[i]! -= lambda * beta[i]!;
     }
     for (let i = 0; i < k; i++) XtX[i]![i]! += 1e-6;
     const M = XtX.map((row, i) => [...row, XtR[i]!]);
@@ -994,7 +1101,16 @@ function fitLogitBeta(rows: { y: number; x: number[] }[], width: number): number
     }
     if (maxStep < 1e-8) break;
   }
-  return beta.every(Number.isFinite) ? beta : null;
+  if (!beta.every(Number.isFinite)) return null;
+  // Back to raw-feature space: beta_raw[j] = beta_std[j] / sd_j, and the
+  // intercept absorbs the standardisation means.
+  const raw = new Array<number>(k).fill(0);
+  raw[0] = beta[0]!;
+  for (let j = 1; j < k; j++) {
+    raw[j] = beta[j]! / sds[j]!;
+    raw[0]! -= (beta[j]! * means[j]!) / sds[j]!;
+  }
+  return raw;
 }
 
 /** The first chain a protocol names, or 'other' when it names none. */
@@ -1149,7 +1265,7 @@ export function farmVerdict(implied: number, tvlUsd: number, feesUsd: number, mi
 /** Everything the fits compute once per snapshot: both ladders, the curve, the odds, the residual quantiles, and the two extra held-out tests per side. */
 export interface Fits {
   value_ladder: LadderRow[];
-  fit: { a: number; b: number };
+  fit: ValueFitModel;
   odds_ladder: LadderRow[];
   beta: number[];
   terms: number[];
@@ -1164,7 +1280,7 @@ export interface Fits {
   q25: number;
   q75: number;
   q90: number;
-  /** Leave-one-category-out and leave-one-chain-out median miss of the size curve. */
+  /** Leave-one-category-out and leave-one-chain-out median miss of the kept value model. */
   loco_miss: number;
   locho_miss: number;
   /** Per-category leave-one-out residual bands, for categories with at least
@@ -1178,7 +1294,12 @@ export interface Fits {
 }
 
 /** A category carries its own residual band only when it has this many priced peers; fewer, and the global band is the honest one. */
-export const CAT_BAND_MIN_N = 8;
+export const CAT_BAND_MIN_N = 5;
+/** The blend weight for per-category bands: a category's own quantiles get
+ *  n/(n+k) of the weight and the global band the rest, so a thin category's
+ *  band is pulled toward the global one instead of trusting a handful of
+ *  residuals. */
+export const CAT_BAND_BLEND_K = 8;
 
 /** Fit everything once: the value ladder, the odds ladder, the leave-one-out residuals for the printed ranges, and the two extra held-out tests per side. */
 export function fitAll(snapshot: Snapshot): Fits {
@@ -1189,8 +1310,8 @@ export function fitAll(snapshot: Snapshot): Fits {
   // the peer so the bands can be cut per category as well as globally.
   const looByPeer = peers.map((p, i) => {
     const rest = peers.filter((_, j) => j !== i);
-    const f = olsFit(rest);
-    return { p, res: ln(p.mcap_usd!) - ln(Math.max(1, Math.exp(f.a + f.b * ln(p.tvl_usd / 1e8)))) };
+    const f = refitValueModel(rest, fit);
+    return { p, res: ln(p.mcap_usd!) - ln(Math.max(1, valuePredict(p, f))) };
   });
   const looResiduals = looByPeer.map((x) => x.res).sort((a, b) => a - b);
   const q = (x: number) => looResiduals[Math.min(looResiduals.length - 1, Math.max(0, Math.floor(x * looResiduals.length)))]!;
@@ -1214,8 +1335,8 @@ export function fitAll(snapshot: Snapshot): Fits {
     for (const [, members] of groups) {
       const trainG = peers.filter((p) => !members.includes(p));
       if (trainG.length < 10) continue;
-      const f = olsFit(trainG);
-      for (const p of members) errs.push(Math.abs(ln(p.mcap_usd!) - ln(Math.max(1, Math.exp(f.a + f.b * ln(p.tvl_usd / 1e8))))));
+      const f = refitValueModel(trainG, fit);
+      for (const p of members) errs.push(Math.abs(ln(p.mcap_usd!) - ln(Math.max(1, valuePredict(p, f)))));
     }
     errs.sort((a, b) => a - b);
     return Math.exp(median(errs));
@@ -1232,12 +1353,24 @@ export function fitAll(snapshot: Snapshot): Fits {
     if (!byCat.has(k)) byCat.set(k, []);
     byCat.get(k)!.push(res);
   }
+  // A category's band blends its own residual quantiles with the global
+  // band at weight n/(n+CAT_BAND_BLEND_K): a thin category is pulled toward
+  // the global band instead of trusting a handful of residuals.
+  const globalQ = quantilesOf(looResiduals);
+  const blendBand = (catQ: { q10: number; q25: number; q75: number; q90: number }, n: number) => {
+    const w = n / (n + CAT_BAND_BLEND_K);
+    return {
+      q10: w * catQ.q10 + (1 - w) * globalQ.q10,
+      q25: w * catQ.q25 + (1 - w) * globalQ.q25,
+      q75: w * catQ.q75 + (1 - w) * globalQ.q75,
+      q90: w * catQ.q90 + (1 - w) * globalQ.q90,
+    };
+  };
   const catQuantiles: Record<string, { n: number; q10: number; q25: number; q75: number; q90: number }> = {};
   for (const [k, rs] of byCat) {
     if (rs.length < CAT_BAND_MIN_N) continue;
-    catQuantiles[k] = { n: rs.length, ...quantilesOf(rs) };
+    catQuantiles[k] = { n: rs.length, ...blendBand(quantilesOf(rs), rs.length) };
   }
-  const globalQ = quantilesOf(looResiduals);
   let in2575 = 0;
   let in1090 = 0;
   for (const { p, res } of looByPeer) {
@@ -1247,7 +1380,7 @@ export function fitAll(snapshot: Snapshot): Fits {
     // from the peer itself, so the coverage is held out.
     const catPeers = looByPeer.filter((x) => (x.p.category ?? 'Unknown') === k);
     const others = catPeers.filter((x) => x.p !== p).map((x) => x.res);
-    const b = rs.length >= CAT_BAND_MIN_N ? quantilesOf(others) : globalQ;
+    const b = rs.length >= CAT_BAND_MIN_N ? blendBand(quantilesOf(others), others.length) : globalQ;
     if (res >= b.q25 && res <= b.q75) in2575++;
     if (res >= b.q10 && res <= b.q90) in1090++;
   }
@@ -1294,11 +1427,11 @@ export function buildBoard(snapshot: Snapshot, fits: Fits): BoardRow[] {
   for (let b = 0; b < BOOTSTRAP_REFITS; b++) {
     const sample: SnapshotProtocol[] = [];
     for (let i = 0; i < peers.length; i++) sample.push(peers[Math.floor(rng() * peers.length)]!);
-    const f = olsFit(sample);
+    const f = refitValueModel(sample, fit);
     const scored = rankable
       .map((p) => ({
         slug: p.slug,
-        implied: Math.max(1, Math.round(Math.exp(f.a + f.b * ln(Math.max(1, p.tvl_usd) / 1e8)) * tokenOdds(p, snapshot.as_of, beta, terms, oddsPeers))),
+        implied: Math.max(1, Math.round(valuePredict(p, f) * tokenOdds(p, snapshot.as_of, beta, terms, oddsPeers))),
       }))
       .sort((x, y) => y.implied - x.implied || (x.slug < y.slug ? -1 : 1));
     scored.forEach((s, i) => rankSamples.get(s.slug)!.push(i + 1));
@@ -1316,7 +1449,7 @@ export function buildBoard(snapshot: Snapshot, fits: Fits): BoardRow[] {
     tvl_usd: p.tvl_usd,
     mcap_usd: p.mcap_usd!,
     multiple: p.mcap_usd! / p.tvl_usd,
-    fitted_multiple: fittedMultiple(p.tvl_usd, fit),
+    fitted_multiple: fittedMultiple(p, fit),
   }));
   const nearestPeers = (p: SnapshotProtocol): PeerRef[] => {
     const sameCat = peerRows.filter((q) => q.category === p.category);
@@ -1327,7 +1460,7 @@ export function buildBoard(snapshot: Snapshot, fits: Fits): BoardRow[] {
 
   const scored = rankable.map((p) => {
     const age = ageDays(snapshot.as_of, p.listed_at);
-    const multiple = fittedMultiple(p.tvl_usd, fit);
+    const multiple = fittedMultiple(p, fit);
     const valueIfLaunches = Math.max(1, Math.round(p.tvl_usd * multiple));
     const odds = tokenOdds(p, snapshot.as_of, beta, terms, oddsPeers);
     const implied = Math.max(1, Math.round(valueIfLaunches * odds));
@@ -1415,7 +1548,7 @@ export function liveRows(snapshot: Snapshot, fits: Fits): LiveRow[] {
       tvl_usd: p.tvl_usd,
       mcap_usd: p.mcap_usd,
       change_7d: p.change_7d,
-      fitted_multiple: Math.round(fittedMultiple(p.tvl_usd, fits.fit) * 1e4) / 1e4,
+      fitted_multiple: Math.round(fittedMultiple(p, fits.fit) * 1e4) / 1e4,
     }));
 }
 
@@ -1461,18 +1594,24 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
   const looResiduals: number[] = [];
   for (let i = 0; i < peers.length; i++) {
     const rest = peers.filter((_, j) => j !== i);
-    const f = olsFit(rest);
-    looResiduals.push(ln(peers[i]!.mcap_usd!) - ln(Math.max(1, Math.exp(f.a + f.b * ln(peers[i]!.tvl_usd / 1e8)))));
+    const f = refitValueModel(rest, fits.fit);
+    looResiduals.push(ln(peers[i]!.mcap_usd!) - ln(Math.max(1, valuePredict(peers[i]!, f))));
   }
   looResiduals.sort((a, b) => a - b);
   const inBand = (lo: number, hi: number) => looResiduals.filter((r) => r >= lo && r <= hi).length / looResiduals.length;
+  // The kept value model's misses come from its own ladder row (the last
+  // kept row), not from the size-curve row: the size curve is the baseline
+  // the chain term beat, not the model that ships.
+  const keptValueRows = valueLadderRows.filter((r) => r.kept);
+  const keptValue = keptValueRows.length > 0 ? keptValueRows[keptValueRows.length - 1]! : valueLadderRows[1]!;
   const valueFit: ValueFit = {
     a: Math.round(fits.fit.a * 1000) / 1000,
     b: Math.round(fits.fit.b * 1000) / 1000,
+    chain_coef: fits.fit.chain_coef === null ? null : Math.round(fits.fit.chain_coef * 1000) / 1000,
     n_peers: peers.length,
     flat_multiple: Math.round(median(peers.map((p) => p.mcap_usd! / p.tvl_usd).sort((a, b) => a - b)) * 1e4) / 1e4,
-    loo_miss: Math.round(valueLadderRows[1]!.loo! * 100) / 100,
-    wf_miss: Math.round(valueLadderRows[1]!.wf! * 100) / 100,
+    loo_miss: Math.round(keptValue.loo! * 100) / 100,
+    wf_miss: Math.round(keptValue.wf! * 100) / 100,
     flat_loo_miss: Math.round(valueLadderRows[0]!.loo! * 100) / 100,
     flat_wf_miss: Math.round(valueLadderRows[0]!.wf! * 100) / 100,
     residual_q10: Math.round(fits.q10 * 100) / 100,
