@@ -60,6 +60,20 @@
 // The numbers below are computed from the snapshot at run
 // time — this file states the rules, the snapshot supplies the coefficients.
 //
+// radar-9 keeps radar-8's value model, conformal bands, farm bars and
+// thresholds, and moves one thing: the odds gain an age² term,
+// (ln days listed)². The launch-odds curve in age is not log-linear —
+// the odds rise with age then flatten — and the squared term catches
+// that curvature: 5-fold 0.2173 -> 0.2109, walk-forward 0.2416 -> 0.2408,
+// AUC 0.727 -> 0.738, leave-one-category-out 0.220 -> 0.213,
+// leave-one-chain-out 0.219 -> 0.212. All five held-out tests improve,
+// and the odds ladder keeps the term on its own rule. The ridge stays
+// λ=3 (see the note at ODDS_RIDGE_LAMBDA: with age² in, λ=5 costs
+// 0.0013 on 5-fold, past the noise bar). The value-side chains² term
+// was tried and rejected — it buys walk-forward (x2.08 -> x1.94) by
+// paying leave-one-chain-out (x3.33 -> x3.52), and no ridge on it
+// clears all four value tests at once, so the value model does not move.
+//
 //   value if it launches = TVL x fitted multiple(TVL)
 //     fitted multiple comes from ln(mcap) = a + b x ln(TVL / $100M), OLS on
 //     the 92 traded protocols that survive the watchlist's own cleaning and
@@ -68,7 +82,7 @@
 //     falls as TVL grows. The multiple is clamped to 0.01..1.00 as a sanity
 //     bound; on this snapshot the fitted multiples run 0.017..0.790, so the
 //     clamp binds nowhere.
-//   token odds = logistic(1, ln(age), ln(TVL / $100M), ln(chains),
+//   token odds = logistic(1, ln(age), (ln(age))², ln(TVL / $100M), ln(chains),
 //     7-day growth x ln(TVL)), fitted on the 383 dated, clean protocols:
 //     the share like this one that record a token. No category token rate:
 //     the rate is a marginal average over protocols of very different ages,
@@ -163,7 +177,7 @@ export interface LadderRow {
   note: string;
 }
 
-/** The fitted token-odds model: logistic on ln(age), ln(TVL / $100M), ln(chains) capped at 3 and 7-day growth x ln(TVL), ridge-shrunk (lambda=3) on standardised features. No category token rate: it is dropped by policy (see the odds ladder), not by the tests. */
+/** The fitted token-odds model: logistic on ln(age), (ln(age))², ln(TVL / $100M), ln(chains) capped at 3 and 7-day growth x ln(TVL), ridge-shrunk (lambda=3) on standardised features. No category token rate: it is dropped by policy (see the odds ladder), not by the tests. */
 export interface OddsFit {
   beta: number[];
   terms: number[];
@@ -310,7 +324,7 @@ export class SnapshotError extends Error {
 }
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-8';
+export const MODEL_VERSION = 'radar-9';
 
 /** How many live-token protocols the Live view carries: every priced comp, not a top slice. */
 export const LIVE_ROWS = 92;
@@ -400,16 +414,15 @@ export function getCategoryRateK(): number {
  *  over ~35–46 peers moves in steps far larger than float dust, so a smaller
  *  difference is no improvement at all — it is the median not moving. */
 const KEEP_MARGIN = 0.999;
-/** The odds' ridge penalty λ on standardised features: λ=3 is the largest
- *  shrinkage whose 5-fold cost stays inside noise (5-fold 0.2172 at λ=1,
- *  0.2173 at λ=3 — a cost of 0.00016 against a 0.0005 noise bar) while the
- *  walk-forward Brier improves 0.2443 → 0.2416, AUC 0.726 → 0.727, and
- *  leave-one-category-out / leave-one-chain-out stay flat (0.220 / 0.219).
- *  λ=5 buys a little more walk-forward (0.2394) for a cost of 0.00041,
- *  too close to the noise bar to take; λ=1 was R8's choice, and R9's
- *  re-measurement is what moves it. The penalty goes in BOTH the Hessian
- *  diagonal and the gradient — penalising the Hessian alone leaves the
- *  Newton step converging to the unpenalised optimum. */
+/** The odds' ridge penalty λ on standardised features: λ=3 stays. R9's
+ *  λ=5 case was measured against λ=1 (a cost of 0.00041 on 5-fold); against
+ *  the shipped λ=3 the cost is only 0.00025, and λ=5 buys 0.0022 of
+ *  walk-forward — but that was before the age² term. With age² in the
+ *  model, λ=5 costs 0.0013 on 5-fold (0.2109 → 0.2122), past the 0.0005
+ *  noise bar, for 0.0012 of walk-forward, so the λ=5 case closes the other
+ *  way and λ=3 stays. The penalty goes in BOTH the Hessian diagonal and
+ *  the gradient — penalising the Hessian alone leaves the Newton step
+ *  converging to the unpenalised optimum. */
 export const ODDS_RIDGE_LAMBDA = 3;
 /** Whether `next` beats `prev` by more than the keep margin. */
 function beats(next: number, prev: number): boolean {
@@ -724,6 +737,13 @@ export const ODDS_FEATURES: { name: string; fn: (p: SnapshotProtocol, asOf: stri
     },
   },
   { name: '7-day growth × size', fn: (p) => (clamp(finite(p.change_7d, 0), -50, 150) / 100) * ln(Math.max(1, p.tvl_usd) / 1e8) },
+  {
+    name: 'age squared, (ln days listed)²',
+    fn: (p, asOf) => {
+      const a = ln(Math.max(1, ageDays(asOf, p.listed_at) ?? 365));
+      return a * a;
+    },
+  },
 ];
 
 /** A protocol's token odds under fitted coefficients `beta` and the kept feature list `terms` (indices into ODDS_FEATURES). `ctx` is the peer set the category rate is read from: the full dated peers when scoring the board. */

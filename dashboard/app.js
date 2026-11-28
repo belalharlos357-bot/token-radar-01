@@ -84,11 +84,12 @@
   function oddsKept() { return R.odds_ladder.filter(function (r) { return r.kept; }).length; }
   function keptOddsNames() { return R.odds_ladder.filter(function (r) { return r.kept; }).map(function (r) { return r.term; }).join(' · '); }
   // The kept odds terms as "name — definition" pairs, so the list reads as
-  // five items (intercept + four features) instead of a comma run that
-  // looks like seven. Unknown terms fall back to their ladder name.
+  // six items (intercept + five features) instead of a comma run that
+  // looks like eight. Unknown terms fall back to their ladder name.
   function oddsTermDefs() {
     var defs = {
       'age, ln days listed': 'age — ln days listed',
+      'age squared, (ln days listed)²': 'age² — (ln days listed)²',
       'size, ln TVL': 'size — ln(TVL / $100M)',
       'chain count, ln (capped at 3)': 'chain count — ln(chains, capped at 3)',
       '7-day growth × size': '7-day growth × size — growth × ln TVL',
@@ -383,7 +384,7 @@
       '</div>' +
       '<h3>Nearest priced peers — their tokens trade</h3>' +
       '<table class="mini"><tr><th>Token</th><th>Category</th><th>TVL</th><th>Market cap</th><th>Cap / TVL</th><th>Fitted multiple</th></tr>' + peers + '</table>' +
-      '<p class="note">Chain count (capped at 3) is in the value model — it improves all four held-out tests — while category effect, 7-day growth and age as value terms each failed a held-out test, so they stay out. The odds keep age, size, chain count (capped at 3) and growth × size; plain 7-day growth failed there too, the category token rate was dropped on purpose (see the model tab), and Platt and isotonic calibration helped walk-forward but not 5-fold, so neither is used.</p>' +
+      '<p class="note">Chain count (capped at 3) is in the value model — it improves all four held-out tests — while category effect, 7-day growth and age as value terms each failed a held-out test, so they stay out. The odds keep age, age², size, chain count (capped at 3) and growth × size; plain 7-day growth failed there too, the category token rate was dropped on purpose (see the model tab), and Platt and isotonic calibration helped walk-forward but not 5-fold, so neither is used.</p>' +
       '<h3>Farm verdict · <span class="pill ' + p.verdict.toLowerCase() + '">' + p.verdict + '</span></h3>' +
       '<p class="note" style="margin-top:2px">Minimum deposit to clear both bars at the drop share and horizon above: <b>' +
       (function () {
